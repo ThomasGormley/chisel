@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/sst/opencode-sdk-go"
 	"github.com/sst/opencode-sdk-go/option"
@@ -38,16 +40,14 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	client := opencode.NewClient(option.WithBaseURL("http://localhost:3366"))
-	session, err := client.Session.New(ctx, opencode.SessionNewParams{
-		// Directory: opencode.String("/Users/thomasgormley/dev/dev-cli-go"),
-	})
+
+	projectSession, err := client.Session.New(ctx, opencode.SessionNewParams{})
 	if err != nil {
 		return err
 	}
+	fmt.Printf("projectSessionID: %s\n", projectSession.ID)
 
-	// We only handle the first directive for now
-	d := directives[0]
-
+	// Start event listener for the project session
 	go func() {
 		stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
 
@@ -58,21 +58,47 @@ func run(ctx context.Context, args []string) error {
 			switch event.Type {
 			case opencode.EventListResponseTypePermissionUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
+
+				// Use osascript to show a native macOS dialog
+				script := `display dialog "Agent is requesting permission to perform an action." with title "Chisel Permission" buttons {"Reject", "Allow Once", "Always"} default button "Always" cancel button "Reject" with icon caution`
+				cmd := exec.Command("osascript", "-e", script)
+				output, err := cmd.CombinedOutput()
+
+				response := opencode.SessionPermissionRespondParamsResponseReject
+				if err == nil {
+					outStr := string(output)
+					if strings.Contains(outStr, "Always") {
+						response = opencode.SessionPermissionRespondParamsResponseAlways
+					} else if strings.Contains(outStr, "Allow Once") {
+						response = opencode.SessionPermissionRespondParamsResponseOnce
+					}
+				}
+
 				client.Session.Permissions.Respond(ctx, evt.Properties.SessionID, evt.Properties.ID, opencode.SessionPermissionRespondParams{
-					Response: opencode.F(opencode.SessionPermissionRespondParamsResponseAlways),
+					Response: opencode.F(response),
 				})
-				fmt.Printf("handled_event: %s\n", event.Type)
+				fmt.Printf("handled_event: %s with response: %s\n", event.Type, response)
 			}
 		}
 	}()
 
-	fmt.Printf("Sending directive to agent: %s\n", d.Comment)
+	// Process each directive with its own child session
+	for _, d := range directives {
+		// Create a child session for this directive
+		childSession, err := client.Session.New(ctx, opencode.SessionNewParams{
+			ParentID: opencode.String(projectSession.ID),
+		})
+		if err != nil {
+			return err
+		}
 
-	rsp, err := client.Session.Prompt(
-		ctx,
-		session.ID,
-		opencode.SessionPromptParams{
-			System: opencode.String(`
+		fmt.Printf("Sending directive to agent: %s\n", d.Comment)
+
+		rsp, err := client.Session.Prompt(
+			ctx,
+			childSession.ID,
+			opencode.SessionPromptParams{
+				System: opencode.String(`
 # Chisel Mode - System Reminder
 
 CRITICAL: Modification mode ACTIVE. You are authorized to use your tools to fulfill the @ai directive.
@@ -90,15 +116,15 @@ Your responsibility is to fulfill the @ai directive provided below.
 ## Important
 You have been provided with the exact source of the function and its location. Use this to understand the context, but use your tools to apply the change to the file.
 `),
-			Model: opencode.F(opencode.SessionPromptParamsModel{
-				ModelID:    opencode.String("big-pickle"),
-				ProviderID: opencode.String("opencode"),
-			}),
-			Parts: opencode.F(
-				[]opencode.SessionPromptParamsPartUnion{
-					opencode.TextPartInputParam{
-						Type: opencode.F(opencode.TextPartInputType("text")),
-						Text: opencode.String(fmt.Sprintf(`
+				Model: opencode.F(opencode.SessionPromptParamsModel{
+					ModelID:    opencode.String("big-pickle"),
+					ProviderID: opencode.String("opencode"),
+				}),
+				Parts: opencode.F(
+					[]opencode.SessionPromptParamsPartUnion{
+						opencode.TextPartInputParam{
+							Type: opencode.F(opencode.TextPartInputType("text")),
+							Text: opencode.String(fmt.Sprintf(`
 # Directive Context
 
 <context>
@@ -115,44 +141,38 @@ Line: %d
 %s
 </source>
 `,
-							sourceFile,
-							d.Function,
-							d.StartLine,
-							d.Comment,
-							d.Source,
-						)),
-					},
-				}),
-		},
-	)
+								sourceFile,
+								d.Function,
+								d.StartLine,
+								d.Comment,
+								d.Source,
+							)),
+						},
+					}),
+			},
+		)
 
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("\n--- Agent Response Log ---")
+		for _, part := range rsp.Parts {
+			fmt.Printf("[%s]", part.Type)
+			if part.Text != "" {
+				fmt.Printf(" %s", part.Text)
+			}
+			if part.Tool != "" {
+				fmt.Printf(" Tool: %s", part.Tool)
+			}
+			if part.Reason != "" {
+				fmt.Printf(" Reason: %s", part.Reason)
+			}
+			fmt.Println()
+		}
+		fmt.Println("--------------------------")
 	}
 
-	var rspBytes []byte
-	if err := rsp.UnmarshalJSON(rspBytes); err != nil {
-		return err
-	}
-
-	fmt.Printf("%s\n", rspBytes)
-
-	fmt.Println("\n--- Agent Response Log ---")
-	for _, part := range rsp.Parts {
-		fmt.Printf("[%s]", part.Type)
-		if part.Text != "" {
-			fmt.Printf(" %s", part.Text)
-		}
-		if part.Tool != "" {
-			fmt.Printf(" Tool: %s", part.Tool)
-		}
-		if part.Reason != "" {
-			fmt.Printf(" Reason: %s", part.Reason)
-		}
-		fmt.Println()
-	}
-	fmt.Println("--------------------------")
-
-	fmt.Println("\nDirective processed. Check filesystem for changes.")
+	fmt.Println("\nAll directives processed. Check filesystem for changes.")
 	return nil
 }
