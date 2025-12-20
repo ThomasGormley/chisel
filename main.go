@@ -1,81 +1,75 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"strings"
+	"os"
 
-	ts "github.com/tree-sitter/go-tree-sitter"
+	"github.com/sst/opencode-sdk-go"
+	"github.com/sst/opencode-sdk-go/option"
 )
 
 func main() {
-	code := []byte(`package main
-
-import (
-	"fmt"
-	"log"
-	"strings"
-
-	ts "github.com/tree-sitter/go-tree-sitter"
-	ts_go "github.com/tree-sitter/tree-sitter-go/bindings/go"
-)
-
-func doSomething(ctx context.Context, s string) error {
-
-	fnc := func() {
-		// @ai implement the function
-		// Now we have multilines
-		// And one more
+	if err := run(context.Background(), os.Args); err != nil {
+		log.Fatalf("running: %v", err)
 	}
-
-	return nil
 }
 
-func doAnotherThing(ctx context.Context, s string) error {
-	// @ai can you also do this?
+func run(ctx context.Context, args []string) error {
 
-	return nil
-}
+	sourceFile := args[1]
+	fmt.Println(sourceFile)
 
-// Some context here
-// @ai this is a method directive
-// with more details
-func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) error {
-	return nil
-}
-`)
-
-	parser := NewParser()
-	directives, err := parser.Parse(code)
+	file, err := os.ReadFile(sourceFile)
 	if err != nil {
-		log.Fatalf("parsing: %v", err)
+		return err
+	}
+	parser := NewParser()
+	directives, err := parser.Parse(file)
+	if err != nil {
+		return err
 	}
 
 	for _, d := range directives {
-		fmt.Printf("Function: %s (lines %d-%d)\n", d.Function, d.StartLine, d.EndLine)
-		fmt.Printf("Comment:\n%s\n\n", d.Comment)
-	}
-}
-
-// printTree prints the syntax tree rooted at n with indentation (for debugging).
-func printTree(n *ts.Node, depth int) {
-	if n == nil {
-		return
+		fmt.Printf("Function: %s (lines %d-%d, bytes %d-%d)\n", d.Function, d.StartLine, d.EndLine, d.StartByte, d.EndByte)
+		fmt.Printf("Comment: (bytes %d-%d)\n%s\n", d.CommentStart, d.CommentEnd, d.Comment)
+		fmt.Printf("Source:\n%s\n\n\n", d.Source)
 	}
 
-	indent := strings.Repeat("  ", depth)
-	start := n.StartPosition()
-	end := n.EndPosition()
-
-	fmt.Printf("%s%s [%d:%d - %d:%d]\n",
-		indent,
-		n.Kind(),
-		start.Row+1, start.Column+1,
-		end.Row+1, end.Column+1,
+	client := opencode.NewClient(option.WithBaseURL("http://localhost:3366"))
+	session, err := client.Session.New(ctx, opencode.SessionNewParams{})
+	if err != nil {
+		return err
+	}
+	rsp, err := client.Session.Prompt(
+		ctx,
+		session.ID,
+		opencode.SessionPromptParams{
+			Model: opencode.F(opencode.SessionPromptParamsModel{
+				ModelID:    opencode.String("big-pickle"),
+				ProviderID: opencode.String("opencode"),
+			}),
+			Parts: opencode.F(
+				[]opencode.SessionPromptParamsPartUnion{
+					opencode.TextPartInputParam{
+						Type: opencode.F(opencode.TextPartInputType("text")),
+						Text: opencode.String(fmt.Sprintf("%s \nfile: %s:%d", directives[0].Comment, sourceFile, directives[0].StartLine)),
+					},
+				}),
+		},
 	)
 
-	for i := uint(0); i < n.ChildCount(); i++ {
-		child := n.Child(i)
-		printTree(child, depth+1)
+	if err != nil {
+		return err
 	}
+
+	for _, part := range rsp.Parts {
+		if part.Type == "text" {
+			fmt.Printf("agent_message_chunk\n%s\n", part.Text)
+		} else {
+			fmt.Printf("%s\n", part.Type)
+		}
+	}
+	return nil
 }

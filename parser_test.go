@@ -23,6 +23,7 @@ func doSomething() error {
 				{
 					Comment:   "// @ai implement this",
 					Function:  "doSomething",
+					Source:    "func doSomething() error {\n\t// @ai implement this\n\treturn nil\n}",
 					StartLine: 3,
 					EndLine:   6,
 				},
@@ -42,6 +43,7 @@ func process() {
 				{
 					Comment:   "// @ai implement the function\n// with multiple lines\n// of instructions",
 					Function:  "process",
+					Source:    "func process() {\n\t// @ai implement the function\n\t// with multiple lines\n\t// of instructions\n}",
 					StartLine: 3,
 					EndLine:   7,
 				},
@@ -60,6 +62,7 @@ func (s *Server) handleRequest() error {
 				{
 					Comment:   "// @ai handle the request",
 					Function:  "handleRequest",
+					Source:    "func (s *Server) handleRequest() error {\n\t// @ai handle the request\n\treturn nil\n}",
 					StartLine: 3,
 					EndLine:   6,
 				},
@@ -80,6 +83,7 @@ func outer() {
 				{
 					Comment:   "// @ai implement closure",
 					Function:  "<anonymous>",
+					Source:    "func() {\n\t\t// @ai implement closure\n\t}",
 					StartLine: 4,
 					EndLine:   6,
 				},
@@ -98,6 +102,7 @@ func calculate() int {
 				{
 					Comment:   "// @ai implement this function",
 					Function:  "calculate",
+					Source:    "func calculate() int {\n\treturn 0\n}",
 					StartLine: 4,
 					EndLine:   6,
 				},
@@ -117,6 +122,7 @@ func important() {
 				{
 					Comment:   "// Some context here\n// @ai implement with care\n// more details follow",
 					Function:  "important",
+					Source:    "func important() {\n}",
 					StartLine: 6,
 					EndLine:   7,
 				},
@@ -135,6 +141,7 @@ func (c *Client) connect() error {
 				{
 					Comment:   "// @ai fix this method",
 					Function:  "connect",
+					Source:    "func (c *Client) connect() error {\n\treturn nil\n}",
 					StartLine: 4,
 					EndLine:   6,
 				},
@@ -156,12 +163,14 @@ func second() {
 				{
 					Comment:   "// @ai implement first",
 					Function:  "first",
+					Source:    "func first() {\n\t// @ai implement first\n}",
 					StartLine: 3,
 					EndLine:   5,
 				},
 				{
 					Comment:   "// @ai implement second",
 					Function:  "second",
+					Source:    "func second() {\n\t// @ai implement second\n}",
 					StartLine: 7,
 					EndLine:   9,
 				},
@@ -200,6 +209,7 @@ func spaced() {
 				{
 					Comment:   "//  @ai extra space before directive",
 					Function:  "spaced",
+					Source:    "func spaced() {\n\t//  @ai extra space before directive\n}",
 					StartLine: 3,
 					EndLine:   5,
 				},
@@ -223,6 +233,7 @@ func outer() {
 				{
 					Comment:   "// @ai deeply nested",
 					Function:  "<anonymous>",
+					Source:    "func() {\n\t\t\t// @ai deeply nested\n\t\t}",
 					StartLine: 5,
 					EndLine:   7,
 				},
@@ -241,13 +252,34 @@ func mixed() {
 				{
 					Comment:   "// @ai doc comment",
 					Function:  "mixed",
+					Source:    "func mixed() {\n\t// @ai body comment\n}",
 					StartLine: 4,
 					EndLine:   6,
 				},
 				{
 					Comment:   "// @ai body comment",
 					Function:  "mixed",
+					Source:    "func mixed() {\n\t// @ai body comment\n}",
 					StartLine: 4,
+					EndLine:   6,
+				},
+			},
+		},
+		{
+			name: "function with parameters and return types",
+			code: `package main
+
+func transform(input string, count int) (string, error) {
+	// @ai transform the input
+	return "", nil
+}
+`,
+			expected: []AIDirective{
+				{
+					Comment:   "// @ai transform the input",
+					Function:  "transform",
+					Source:    "func transform(input string, count int) (string, error) {\n\t// @ai transform the input\n\treturn \"\", nil\n}",
+					StartLine: 3,
 					EndLine:   6,
 				},
 			},
@@ -275,6 +307,9 @@ func mixed() {
 				}
 				if got.Function != exp.Function {
 					t.Errorf("directive[%d].Function: expected %q, got %q", i, exp.Function, got.Function)
+				}
+				if got.Source != exp.Source {
+					t.Errorf("directive[%d].Source:\n  expected: %q\n  got:      %q", i, exp.Source, got.Source)
 				}
 				if got.StartLine != exp.StartLine {
 					t.Errorf("directive[%d].StartLine: expected %d, got %d", i, exp.StartLine, got.StartLine)

@@ -20,10 +20,15 @@ var functionKinds = map[string]bool{
 
 // AIDirective represents an @ai comment and its enclosing function context.
 type AIDirective struct {
-	Comment   string
-	Function  string
-	StartLine uint
-	EndLine   uint
+	Comment      string
+	Function     string
+	Source       string
+	StartLine    uint
+	EndLine      uint
+	StartByte    uint
+	EndByte      uint
+	CommentStart uint
+	CommentEnd   uint
 }
 
 // Parser extracts AI directives from Go source code using tree-sitter.
@@ -40,6 +45,7 @@ func NewParser() *Parser {
 
 // Parse extracts all AI directives from the given Go source code.
 func (p *Parser) Parse(code []byte) ([]AIDirective, error) {
+	// @ai add some logging
 	parser := ts.NewParser()
 	defer parser.Close()
 
@@ -84,11 +90,17 @@ func (p *Parser) extractDirectives(code []byte, root *ts.Node) ([]AIDirective, e
 			continue
 		}
 
+		commentText, commentStart, commentEnd := collectCommentBlock(code, &commentNode)
 		directives = append(directives, AIDirective{
-			Comment:   collectCommentBlock(code, &commentNode),
-			Function:  extractFunctionName(code, funcNode),
-			StartLine: funcNode.StartPosition().Row + 1,
-			EndLine:   funcNode.EndPosition().Row + 1,
+			Comment:      commentText,
+			Function:     extractFunctionName(code, funcNode),
+			Source:       extractFunctionSource(code, funcNode),
+			StartLine:    funcNode.StartPosition().Row + 1,
+			EndLine:      funcNode.EndPosition().Row + 1,
+			StartByte:    funcNode.StartByte(),
+			EndByte:      funcNode.EndByte(),
+			CommentStart: commentStart,
+			CommentEnd:   commentEnd,
 		})
 	}
 
@@ -131,9 +143,14 @@ func extractFunctionName(code []byte, funcNode *ts.Node) string {
 	return string(code[nameNode.StartByte():nameNode.EndByte()])
 }
 
+// extractFunctionSource returns the full source code of a function node.
+func extractFunctionSource(code []byte, funcNode *ts.Node) string {
+	return string(code[funcNode.StartByte():funcNode.EndByte()])
+}
+
 // collectCommentBlock gathers a contiguous block of comments around an @ai comment.
 // It collects both preceding and following sibling comments to capture the full context.
-func collectCommentBlock(code []byte, n *ts.Node) string {
+func collectCommentBlock(code []byte, n *ts.Node) (string, uint, uint) {
 	start := n.StartByte()
 	end := n.EndByte()
 
@@ -161,5 +178,5 @@ func collectCommentBlock(code []byte, n *ts.Node) string {
 		lines[i] = strings.TrimLeft(line, " \t")
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), start, end
 }
