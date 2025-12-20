@@ -18,6 +18,55 @@ func main() {
 	}
 }
 
+func startEventListener(ctx context.Context, client *opencode.Client) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Event stream goroutine panicked: %v\n", r)
+		}
+	}()
+
+	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
+	defer stream.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if !stream.Next() {
+				return
+			}
+
+			event := stream.Current()
+
+			switch event.Type {
+			case opencode.EventListResponseTypePermissionUpdated:
+				fmt.Printf("recieved_event: %s\n", event.Type)
+				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
+
+				// Use osascript to show a native macOS dialog
+				script := `display dialog "Agent is requesting permission to perform an action." with title "Chisel Permission" buttons {"Reject", "Allow Once", "Always"} default button "Always" cancel button "Reject" with icon caution`
+				cmd := exec.Command("osascript", "-e", script)
+				output, err := cmd.CombinedOutput()
+
+				response := opencode.SessionPermissionRespondParamsResponseReject
+				if err == nil {
+					outStr := string(output)
+					if strings.Contains(outStr, "Always") {
+						response = opencode.SessionPermissionRespondParamsResponseAlways
+					} else if strings.Contains(outStr, "Allow Once") {
+						response = opencode.SessionPermissionRespondParamsResponseOnce
+					}
+				}
+
+				client.Session.Permissions.Respond(ctx, evt.Properties.SessionID, evt.Properties.ID, opencode.SessionPermissionRespondParams{
+					Response: opencode.F(response),
+				})
+			}
+		}
+	}
+}
+
 func run(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: chisel <file>")
@@ -47,40 +96,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("projectSessionID: %s\n", projectSession.ID)
 
-	// Start event listener for the project session
-	go func() {
-		stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
-
-		for stream.Next() {
-			event := stream.Current()
-
-			fmt.Printf("recieved_event: %s\n", event.Type)
-			switch event.Type {
-			case opencode.EventListResponseTypePermissionUpdated:
-				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
-
-				// Use osascript to show a native macOS dialog
-				script := `display dialog "Agent is requesting permission to perform an action." with title "Chisel Permission" buttons {"Reject", "Allow Once", "Always"} default button "Always" cancel button "Reject" with icon caution`
-				cmd := exec.Command("osascript", "-e", script)
-				output, err := cmd.CombinedOutput()
-
-				response := opencode.SessionPermissionRespondParamsResponseReject
-				if err == nil {
-					outStr := string(output)
-					if strings.Contains(outStr, "Always") {
-						response = opencode.SessionPermissionRespondParamsResponseAlways
-					} else if strings.Contains(outStr, "Allow Once") {
-						response = opencode.SessionPermissionRespondParamsResponseOnce
-					}
-				}
-
-				client.Session.Permissions.Respond(ctx, evt.Properties.SessionID, evt.Properties.ID, opencode.SessionPermissionRespondParams{
-					Response: opencode.F(response),
-				})
-				fmt.Printf("handled_event: %s with response: %s\n", event.Type, response)
-			}
-		}
-	}()
+	go startEventListener(ctx, client)
 
 	// Process each directive with its own child session
 	for _, d := range directives {
@@ -99,9 +115,7 @@ func run(ctx context.Context, args []string) error {
 			childSession.ID,
 			opencode.SessionPromptParams{
 				System: opencode.String(`
-# Chisel Mode - System Reminder
-
-CRITICAL: Modification mode ACTIVE. You are authorized to use your tools to fulfill the @ai directive.
+# Chisel - System Reminder
 
 ---
 
