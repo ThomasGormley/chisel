@@ -38,7 +38,9 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	client := opencode.NewClient(option.WithBaseURL("http://localhost:3366"))
-	session, err := client.Session.New(ctx, opencode.SessionNewParams{})
+	session, err := client.Session.New(ctx, opencode.SessionNewParams{
+		// Directory: opencode.String("/Users/thomasgormley/dev/dev-cli-go"),
+	})
 	if err != nil {
 		return err
 	}
@@ -46,23 +48,31 @@ func run(ctx context.Context, args []string) error {
 	// We only handle the first directive for now
 	d := directives[0]
 
+	go func() {
+		stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
+
+		for stream.Next() {
+			event := stream.Current()
+
+			fmt.Printf("recieved_event: %s\n", event.Type)
+			switch event.Type {
+			case opencode.EventListResponseTypePermissionUpdated:
+				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
+				client.Session.Permissions.Respond(ctx, evt.Properties.SessionID, evt.Properties.ID, opencode.SessionPermissionRespondParams{
+					Response: opencode.F(opencode.SessionPermissionRespondParamsResponseAlways),
+				})
+				fmt.Printf("handled_event: %s\n", event.Type)
+			}
+		}
+	}()
+
 	fmt.Printf("Sending directive to agent: %s\n", d.Comment)
 
 	rsp, err := client.Session.Prompt(
 		ctx,
 		session.ID,
 		opencode.SessionPromptParams{
-			NoReply: opencode.Bool(true),
-			Model: opencode.F(opencode.SessionPromptParamsModel{
-				ModelID:    opencode.String("big-pickle"),
-				ProviderID: opencode.String("opencode"),
-			}),
-			Parts: opencode.F(
-				[]opencode.SessionPromptParamsPartUnion{
-					opencode.TextPartInputParam{
-						Type:      opencode.F(opencode.TextPartInputType("text")),
-						Synthetic: opencode.Bool(true),
-						Text: opencode.String(`
+			System: opencode.String(`
 # Chisel Mode - System Reminder
 
 CRITICAL: Modification mode ACTIVE. You are authorized to use your tools to fulfill the @ai directive.
@@ -80,19 +90,6 @@ Your responsibility is to fulfill the @ai directive provided below.
 ## Important
 You have been provided with the exact source of the function and its location. Use this to understand the context, but use your tools to apply the change to the file.
 `),
-					},
-				}),
-		},
-	)
-
-	if err != nil {
-		return err
-	}
-
-	rsp, err = client.Session.Prompt(
-		ctx,
-		session.ID,
-		opencode.SessionPromptParams{
 			Model: opencode.F(opencode.SessionPromptParamsModel{
 				ModelID:    opencode.String("big-pickle"),
 				ProviderID: opencode.String("opencode"),
@@ -101,12 +98,27 @@ You have been provided with the exact source of the function and its location. U
 				[]opencode.SessionPromptParamsPartUnion{
 					opencode.TextPartInputParam{
 						Type: opencode.F(opencode.TextPartInputType("text")),
-						Text: opencode.String(fmt.Sprintf(
-							"Directive: %s\nFile: %s\nFunction: %s\nLine: %d\n\nSource:\n%s",
-							d.Comment,
+						Text: opencode.String(fmt.Sprintf(`
+# Directive Context
+
+<context>
+File: %s
+Function: %s
+Line: %d
+</context>
+
+<directive>
+%s
+</directive>
+
+<source>
+%s
+</source>
+`,
 							sourceFile,
 							d.Function,
 							d.StartLine,
+							d.Comment,
 							d.Source,
 						)),
 					},
@@ -117,6 +129,13 @@ You have been provided with the exact source of the function and its location. U
 	if err != nil {
 		return err
 	}
+
+	var rspBytes []byte
+	if err := rsp.UnmarshalJSON(rspBytes); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s\n", rspBytes)
 
 	fmt.Println("\n--- Agent Response Log ---")
 	for _, part := range rsp.Parts {
