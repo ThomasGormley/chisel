@@ -1,15 +1,26 @@
 package git
 
 import (
+	"bytes"
+	"fmt"
 	"os/exec"
-	"strings"
 )
 
 func DiffStat(upstream string) (string, error) {
+	fmt.Printf("Running git diff --stat against %s\n", upstream)
+
 	cmd := exec.Command("git", "diff", "--stat", upstream)
-	output, err := cmd.Output()
+	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("git diff --stat failed: %v", err)
 	}
-	return strings.TrimSpace(string(output)), nil
+
+	result := string(bytes.TrimSpace(out))
+	if result == "" {
+		fmt.Println("No differences found")
+	} else {
+		fmt.Printf("Diff statistics:\n%s\n", result)
+	}
+
+	return result, nil
 }

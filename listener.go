@@ -81,11 +81,20 @@ func listen(ctx context.Context, client *opencode.Client) {
 			case opencode.EventListResponseTypeMessagePartUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
 				part := evt.Properties.Part
+
+				if (part.Type == opencode.PartTypeReasoning || part.Type == opencode.PartTypeText) && evt.Properties.Delta != "" {
+					fmt.Print(evt.Properties.Delta)
+				}
+
+				if part.URL != "" {
+					fmt.Printf("\n🌐 Fetching: %s\n", part.URL)
+				}
+
 				if part.Type == opencode.PartTypeTool && part.Tool != "" {
 					if part.ID != lastToolCallID {
 						lastToolCallID = part.ID
 						lastToolTitle = ""
-						fmt.Printf("🔨 Tool: %s\n", part.Tool)
+						fmt.Printf("\n🔨 Tool: %s", part.Tool)
 					}
 
 					// Safely handle state as a map for more flexible property checking
@@ -93,7 +102,7 @@ func listen(ctx context.Context, client *opencode.Client) {
 					if ok {
 						if state.Title != "" && state.Title != lastToolTitle {
 							lastToolTitle = state.Title
-							fmt.Printf(" (%s)\n", state.Title)
+							fmt.Printf(" (%s)", state.Title)
 						}
 						if state.Status == "completed" || state.Status == "error" {
 							fmt.Println()
@@ -103,7 +112,7 @@ func listen(ctx context.Context, client *opencode.Client) {
 
 			case opencode.EventListResponseTypeFileEdited:
 				evt := event.AsUnion().(opencode.EventListResponseEventFileEdited)
-				fmt.Printf("💾 Edited: %s\n", evt.Properties.File)
+				fmt.Printf("\n💾 Edited: %s\n", evt.Properties.File)
 
 			case opencode.EventListResponseTypeTodoUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventTodoUpdated)
@@ -112,15 +121,20 @@ func listen(ctx context.Context, client *opencode.Client) {
 					if todo.Status != prevStatus {
 						lastTodoStatus[todo.ID] = todo.Status
 						if todo.Status == "completed" {
-							fmt.Printf("✅ %s\n", todo.Content)
+							fmt.Printf("\n✅ %s\n", todo.Content)
 						} else if todo.Status == "in_progress" {
-							fmt.Printf("⏳ %s\n", todo.Content)
+							fmt.Printf("\n⏳ %s\n", todo.Content)
 						}
 					}
 				}
 
 			case opencode.EventListResponseTypeSessionError:
-				fmt.Printf("❌ Session error occurred\n")
+				evt := event.AsUnion().(opencode.EventListResponseEventSessionError)
+				fmt.Printf("\n❌ Session error: %s\n", evt.Properties.Error.Name)
+
+			case opencode.EventListResponseTypeLspClientDiagnostics:
+				evt := event.AsUnion().(opencode.EventListResponseEventLspClientDiagnostics)
+				fmt.Printf("\n🚨 LSP Diagnostic at %s (Server: %s)\n", evt.Properties.Path, evt.Properties.ServerID)
 
 			case opencode.EventListResponseTypeSessionIdle:
 				fmt.Println("🏁 Done.")
