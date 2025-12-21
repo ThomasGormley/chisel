@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -43,20 +44,46 @@ func NewParser() *Parser {
 	}
 }
 
+func (d *AIDirective) Prompt() (string, error) {
+	lines := strings.Split(d.Comment, "\n")
+	var result []string
+
+	for _, line := range lines {
+		line = strings.TrimLeft(line, " \t")
+		line = strings.TrimPrefix(line, "// ")
+		line = strings.TrimPrefix(line, "@ai ")
+		line = strings.TrimSpace(line)
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+
+	return strings.Join(result, "\n"), nil
+}
+
 // Parse extracts all AI directives from the given Go source code.
 func (p *Parser) Parse(code []byte) ([]AIDirective, error) {
-	// @ai add some logging
+	log.Printf("Parsing %d bytes of code", len(code))
+
 	parser := ts.NewParser()
 	defer parser.Close()
 
 	if err := parser.SetLanguage(p.language); err != nil {
+		log.Printf("Error setting language: %v", err)
 		return nil, fmt.Errorf("setting language: %w", err)
 	}
 
 	tree := parser.Parse(code, nil)
 	defer tree.Close()
 
-	return p.extractDirectives(code, tree.RootNode())
+	directives, err := p.extractDirectives(code, tree.RootNode())
+	if err != nil {
+		log.Printf("Error extracting directives: %v", err)
+		return nil, err
+	}
+
+	log.Printf("Found %d AI directives", len(directives))
+	return directives, nil
 }
 
 // extractDirectives runs the query and builds the directive list.
