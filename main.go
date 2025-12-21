@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/sst/opencode-sdk-go"
 	"github.com/sst/opencode-sdk-go/option"
 )
 
 //go:embed prompts/system.md
-var systemPromptFile []byte
+var systemPrompt []byte
 
 //go:embed prompts/directive-context.md
 var directivePromptFile []byte
@@ -26,18 +25,17 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
+	flagSet := flag.NewFlagSet("chisel", flag.ExitOnError)
 	var (
-		host = flag.String("host", "http://localhost", "opencode server host (including protocol)")
-		port = flag.String("port", "3366", "opencode server port")
+		host = flagSet.String("host", "http://localhost", "opencode server host (including protocol)")
+		port = flagSet.String("port", "3366", "opencode server port")
 	)
-	flag.Parse()
+	flagSet.Parse(args)
 
-	if flag.NArg() < 1 {
+	if flagSet.NArg() < 1 {
 		return fmt.Errorf("usage: chisel [flags] <file>")
 	}
-	sourceFile := flag.Arg(0)
-
-	systemPrompt := systemPromptFile
+	sourceFile := flagSet.Arg(0)
 
 	file, err := os.ReadFile(sourceFile)
 	if err != nil {
@@ -55,9 +53,6 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	baseURL := *host
-	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-		baseURL = "http://" + baseURL
-	}
 	if *port != "" {
 		baseURL = fmt.Sprintf("%s:%s", baseURL, *port)
 	}
@@ -68,23 +63,16 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	go listen(ctx, client)
+	go eventListener(ctx, client)
 
-	// Process each directive with its own child session
 	for _, d := range directives {
-		// Create a child session for this directive
-		childSession, err := client.Session.New(ctx, opencode.SessionNewParams{
-			ParentID: opencode.String(mainSession.ID),
-		})
+		promptText, err := d.Prompt()
 		if err != nil {
 			return err
 		}
-
-		fmt.Printf("Sending directive to agent: %s\n", d.Comment)
-
-		rsp, err := client.Session.Prompt(
+		_, err = client.Session.Prompt(
 			ctx,
-			childSession.ID,
+			mainSession.ID,
 			opencode.SessionPromptParams{
 				System: opencode.String(string(systemPrompt)),
 				Model: opencode.F(opencode.SessionPromptParamsModel{
@@ -95,11 +83,10 @@ func run(ctx context.Context, args []string) error {
 					[]opencode.SessionPromptParamsPartUnion{
 						opencode.TextPartInputParam{
 							Type: opencode.F(opencode.TextPartInputType("text")),
-
 							Text: opencode.String(fmt.Sprintf(string(directivePromptFile),
 								sourceFile,
 								d.Function,
-								d.Comment,
+								promptText,
 								d.Source,
 							)),
 						},
@@ -110,23 +97,6 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-
-		fmt.Println("\n--- Agent Response Log ---")
-		for _, part := range rsp.Parts {
-			fmt.Printf("[%s]", part.Type)
-			if part.Text != "" {
-				fmt.Printf(" %s", part.Text)
-			}
-			if part.Tool != "" {
-				fmt.Printf(" Tool: %s", part.Tool)
-			}
-			if part.Reason != "" {
-				fmt.Printf(" Reason: %s", part.Reason)
-			}
-
-			fmt.Println()
-		}
-		fmt.Println("--------------------------")
 	}
 
 	fmt.Println("\nAll directives processed. Check filesystem for changes.")

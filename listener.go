@@ -33,7 +33,7 @@ func permissionDialog(title, message string) DialogResponse {
 	return DialogResponse{Button: "Reject", Success: true}
 }
 
-func listen(ctx context.Context, client *opencode.Client) {
+func eventListener(ctx context.Context, client *opencode.Client) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("Event stream goroutine panicked: %v\n", r)
