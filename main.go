@@ -99,7 +99,6 @@ func run(ctx context.Context, args []string) error {
 							Text: opencode.String(fmt.Sprintf(string(directivePromptFile),
 								sourceFile,
 								d.Function,
-								d.StartLine,
 								d.Comment,
 								d.Source,
 							)),

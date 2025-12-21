@@ -1,15 +1,12 @@
-# Directive Context
+<META>
+FILE_PATH: %s
+SYMBOL: %s
+</META>
 
-<context>
-File: %s
-Function: %s
-Line: %d
-</context>
-
-<directive>
+<USER_DIRECTIVE>
 %s
-</directive>
+</USER_DIRECTIVE>
 
-<source>
+<SOURCE_CODE>
 %s
-</source>
+</SOURCE_CODE>
