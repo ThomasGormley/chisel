@@ -35,10 +35,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	ctx, cancel := context.WithCancel(ctx)
+	mainCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(mainCtx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	flagSet := flag.NewFlagSet("chisel", flag.ExitOnError)
@@ -52,8 +52,8 @@ func run(ctx context.Context, args []string) error {
 		flagSet.Usage()
 		return nil
 	}
-	sourceFile := flagSet.Arg(0)
 
+	sourceFile := flagSet.Arg(0)
 	file, err := os.ReadFile(sourceFile)
 	if err != nil {
 		return err
@@ -70,17 +70,17 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	client := opencode.NewClient(option.WithBaseURL(flags.baseURL()))
-
-	mainSession, err := client.Session.New(ctx, opencode.SessionNewParams{})
+	client := opencode.NewClient(option.WithBaseURL(flags.BaseURL()))
+	session, err := client.Session.New(ctx, opencode.SessionNewParams{})
 	if err != nil {
 		return err
 	}
 
-	// Start event listener
+	print.Info(os.Stdout, "sessionDir: ", session.Directory)
+
 	eventsDone := make(chan error, 1)
 	go func() {
-		eventsDone <- agent.ListenForEvents(ctx, client)
+		eventsDone <- agent.ListenForEvents(ctx, client, session.ID, session.Directory)
 	}()
 
 	// Process directives
@@ -99,9 +99,14 @@ func run(ctx context.Context, args []string) error {
 				return
 			}
 
+			if os.Getenv("SKIP_PROCESS") == "1" {
+				// @ai skip processing
+				print.Warning(os.Stdout, "Skipping processing")
+				continue
+			}
 			_, err = client.Session.Prompt(
 				ctx,
-				mainSession.ID,
+				session.ID,
 				opencode.SessionPromptParams{
 					System: opencode.String(string(systemPrompt)),
 					Model:  modelParams,
@@ -140,7 +145,14 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("event stream error: %w", err)
 	case <-ctx.Done():
 		print.Warning(os.Stdout, print.Wrap("Shutting down, aborting client session..."))
-		client.Session.Abort(ctx, mainSession.ID, opencode.SessionAbortParams{})
+		abortRsp, err := client.Session.Abort(mainCtx, session.ID, opencode.SessionAbortParams{})
+		if err != nil {
+			print.Warning(os.Stdout, print.Wrap("Failed to abort client session:", err.Error()))
+		} else if abortRsp == nil || !*abortRsp {
+			print.Warning(os.Stdout, print.Wrap("Client session abort did not confirm success."))
+		} else {
+			print.Info(os.Stdout, print.Wrap("Client session aborted successfully."))
+		}
 		<-eventsDone
 		return ctx.Err()
 	}
@@ -153,7 +165,7 @@ type cliFlags struct {
 	provider string
 }
 
-func (c cliFlags) baseURL() string {
+func (c cliFlags) BaseURL() string {
 	url := c.host
 	if c.port != "" {
 		url = fmt.Sprintf("%s:%s", url, c.port)

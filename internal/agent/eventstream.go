@@ -35,8 +35,10 @@ func permissionDialog(title, message string) DialogResponse {
 	return DialogResponse{Button: "Reject", Success: true}
 }
 
-func ListenForEvents(ctx context.Context, client *opencode.Client) error {
-	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
+func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID string, directory string) error {
+	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{
+		Directory: opencode.String(directory),
+	})
 	defer stream.Close()
 
 	for {
@@ -53,6 +55,9 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 			switch event.Type {
 			case opencode.EventListResponseTypePermissionUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
+				if evt.Properties.SessionID != sessionID {
+					continue
+				}
 
 				dialogResult := permissionDialog("Chisel Permission", "Agent is requesting permission to perform an action.")
 
@@ -67,12 +72,16 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 				}
 
 				client.Session.Permissions.Respond(ctx, evt.Properties.SessionID, evt.Properties.ID, opencode.SessionPermissionRespondParams{
-					Response: opencode.F(response),
+					Response:  opencode.F(response),
+					Directory: opencode.String(directory),
 				})
 
 			case opencode.EventListResponseTypeMessagePartUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
 				part := evt.Properties.Part
+				if part.SessionID != sessionID {
+					continue
+				}
 
 				switch part.Type {
 				case opencode.PartTypeReasoning, opencode.PartTypeText:
@@ -106,6 +115,9 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 
 			case opencode.EventListResponseTypeTodoUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventTodoUpdated)
+				if evt.Properties.SessionID != sessionID {
+					continue
+				}
 				for _, todo := range evt.Properties.Todos {
 					switch todo.Status {
 					case "completed":
@@ -117,6 +129,9 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 
 			case opencode.EventListResponseTypeSessionError:
 				evt := event.AsUnion().(opencode.EventListResponseEventSessionError)
+				if evt.Properties.SessionID != sessionID {
+					continue
+				}
 				print.Errorf(os.Stdout, print.Wrap("❌ Session error: %s"), evt.Properties.Error.Name)
 
 			case opencode.EventListResponseTypeLspClientDiagnostics:
@@ -124,6 +139,10 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 				print.Warningf(os.Stdout, print.Wrap("🚨 LSP Diagnostic at %s (Server: %s)"), evt.Properties.Path, evt.Properties.ServerID)
 
 			case opencode.EventListResponseTypeSessionIdle:
+				evt := event.AsUnion().(opencode.EventListResponseEventSessionIdle)
+				if evt.Properties.SessionID != sessionID {
+					continue
+				}
 				print.Success(os.Stdout, print.Wrap("🏁 Done."))
 			}
 		}
