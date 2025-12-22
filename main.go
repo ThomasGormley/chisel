@@ -72,12 +72,12 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	eventsDone := make(chan error, 1)
+	listenerErrCh := make(chan error, 1)
 	go func() {
-		eventsDone <- agent.ListenForEvents(ctx, client, session.ID)
+		listenerErrCh <- agent.ListenForEvents(ctx, client, session.ID)
 	}()
 
-	processDone := make(chan error, 1)
+	directiveErrCh := make(chan error, 1)
 	go func() {
 		for _, d := range directives {
 			modelParams := opencode.F(opencode.SessionPromptParamsModel{
@@ -88,7 +88,7 @@ func run(ctx context.Context, args []string) error {
 			print.Info(os.Stdout, "->", modelParams.Value.ProviderID.String(), "/", modelParams.Value.ModelID.String())
 			promptText, err := d.Prompt()
 			if err != nil {
-				processDone <- err
+				directiveErrCh <- err
 				return
 			}
 
@@ -118,21 +118,21 @@ func run(ctx context.Context, args []string) error {
 				},
 			)
 			if err != nil {
-				processDone <- err
+				directiveErrCh <- err
 				return
 			}
 		}
 		print.Success(os.Stdout, "\nAll directives processed. Check filesystem for changes.")
-		processDone <- nil
+		directiveErrCh <- nil
 	}()
 
 	// Wait for completion or cancellation
 	select {
-	case err := <-processDone:
+	case err := <-directiveErrCh:
 		cancel()
-		<-eventsDone
+		<-listenerErrCh
 		return err
-	case err := <-eventsDone:
+	case err := <-listenerErrCh:
 		cancel()
 		return fmt.Errorf("event stream error: %w", err)
 	case <-ctx.Done():
@@ -145,7 +145,7 @@ func run(ctx context.Context, args []string) error {
 		} else {
 			print.Info(os.Stdout, print.Wrap("Client session aborted successfully."))
 		}
-		<-eventsDone
+		<-listenerErrCh
 		return ctx.Err()
 	}
 }
