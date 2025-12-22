@@ -23,5 +23,4 @@ Context is provided in a structured format:
 ## Efficiency Constraints
 
 - **Goal:** One-shot execution.
-- **Reasoning:** Keep your internal thought process (Reasoning field) concise.
 - **No Markdown:** When using tools, emit the tool call directly.

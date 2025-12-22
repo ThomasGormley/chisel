@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -35,13 +35,7 @@ func permissionDialog(title, message string) DialogResponse {
 	return DialogResponse{Button: "Reject", Success: true}
 }
 
-func eventListener(ctx context.Context, client *opencode.Client) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("Event stream goroutine panicked: %v\n", r)
-		}
-	}()
-
+func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
 	defer stream.Close()
 
@@ -52,10 +46,10 @@ func eventListener(ctx context.Context, client *opencode.Client) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
 			if !stream.Next() {
-				return
+				return stream.Err()
 			}
 
 			event := stream.Current()
