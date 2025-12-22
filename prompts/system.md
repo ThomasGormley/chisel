@@ -103,9 +103,10 @@ Do NOT:
 - Add imports that aren't strictly necessary for the change
 - Refactor surrounding code "while you're at it"
 - Add comments explaining your changes
-- Change variable names for "clarity"
 - Add error handling beyond what the directive requests
 - Output explanations or summaries
+- Grep the entire codebase for common patterns; use source or quick `read`.
+- Over-verify assumptions (e.g., don't search for import existence if source shows usage).
 
 ## Ambiguous Directives
 

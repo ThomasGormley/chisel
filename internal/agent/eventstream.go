@@ -51,13 +51,7 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 
 			event := stream.Current()
 
-			var properties struct {
-				SessionID string `json:"sessionID"`
-			}
-			if raw := event.JSON.Properties.Raw(); raw != "" {
-				_ = json.Unmarshal([]byte(raw), &properties)
-			}
-			if properties.SessionID != "" && properties.SessionID != sessionID {
+			if !isEventForSession(event, sessionID) {
 				continue
 			}
 
@@ -98,17 +92,16 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 					}
 
 				case opencode.PartTypeTool:
+					state, ok := part.State.(opencode.ToolPartState)
+
 					if part.Tool != "" {
-
-						print.Notef(os.Stdout, print.Wrap("🔨 Tool: %s"), part.Tool)
-
-						// Safely handle state as a map for more flexible property checking
-						state, ok := part.State.(opencode.ToolPartState)
 						if ok && state.Title != "" {
-							print.Infof(os.Stdout, " (%s)", state.Title)
-							if state.Status == "completed" || state.Status == "error" {
-								print.Infof(os.Stdout, "\n")
-							}
+							print.Notef(os.Stdout, print.Wrap("🔨 Tool: %s (%s)"), part.Tool, state.Title)
+						} else {
+							print.Notef(os.Stdout, print.Wrap("🔨 Tool: %s"), part.Tool)
+						}
+						if ok && (state.Status == "completed" || state.Status == "error") {
+							print.Infof(os.Stdout, "\n")
 						}
 					}
 				}
@@ -120,20 +113,6 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 			case opencode.EventListResponseTypeFileEdited:
 				evt := event.AsUnion().(opencode.EventListResponseEventFileEdited)
 				print.Successf(os.Stdout, print.Wrap("💾 Edited: %s"), evt.Properties.File)
-
-			case opencode.EventListResponseTypeTodoUpdated:
-				evt := event.AsUnion().(opencode.EventListResponseEventTodoUpdated)
-				if evt.Properties.SessionID != sessionID {
-					continue
-				}
-				for _, todo := range evt.Properties.Todos {
-					switch todo.Status {
-					case "completed":
-						print.Successf(os.Stdout, print.Wrap("✅ %s"), todo.Content)
-					case "in_progress":
-						print.Warningf(os.Stdout, print.Wrap("⏳ %s"), todo.Content)
-					}
-				}
 
 			case opencode.EventListResponseTypeSessionError:
 				evt := event.AsUnion().(opencode.EventListResponseEventSessionError)
@@ -155,4 +134,15 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 			}
 		}
 	}
+}
+
+func isEventForSession(e opencode.EventListResponse, sID string) bool {
+	var properties struct {
+		SessionID string `json:"sessionID"`
+	}
+	if raw := e.JSON.Properties.Raw(); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &properties)
+	}
+
+	return properties.SessionID == sID
 }
