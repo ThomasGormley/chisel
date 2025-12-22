@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,10 +36,8 @@ func permissionDialog(title, message string) DialogResponse {
 	return DialogResponse{Button: "Reject", Success: true}
 }
 
-func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID string, directory string) error {
-	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{
-		Directory: opencode.String(directory),
-	})
+func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID string) error {
+	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
 	defer stream.Close()
 
 	for {
@@ -52,13 +51,23 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 
 			event := stream.Current()
 
+			var properties struct {
+				SessionID string `json:"sessionID"`
+			}
+			if raw := event.JSON.Properties.Raw(); raw != "" {
+				_ = json.Unmarshal([]byte(raw), &properties)
+			}
+			if properties.SessionID != "" && properties.SessionID != sessionID {
+				continue
+			}
+
 			switch event.Type {
+
 			case opencode.EventListResponseTypePermissionUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
 				if evt.Properties.SessionID != sessionID {
 					continue
 				}
-
 				dialogResult := permissionDialog("Chisel Permission", "Agent is requesting permission to perform an action.")
 
 				response := opencode.SessionPermissionRespondParamsResponseReject
@@ -72,8 +81,7 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 				}
 
 				client.Session.Permissions.Respond(ctx, evt.Properties.SessionID, evt.Properties.ID, opencode.SessionPermissionRespondParams{
-					Response:  opencode.F(response),
-					Directory: opencode.String(directory),
+					Response: opencode.F(response),
 				})
 
 			case opencode.EventListResponseTypeMessagePartUpdated:

@@ -47,7 +47,11 @@ func run(ctx context.Context, args []string) error {
 		fmt.Fprintf(os.Stderr, "usage: chisel [flags] <file>\n")
 		flagSet.PrintDefaults()
 	}
-	flags := parseFlags(flagSet, args)
+	flags, err := parseFlags(flagSet, args)
+	if err != nil {
+		flagSet.Usage()
+		return err
+	}
 	if flagSet.NArg() < 1 {
 		flagSet.Usage()
 		return nil
@@ -71,16 +75,16 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	client := opencode.NewClient(option.WithBaseURL(flags.BaseURL()))
-	session, err := client.Session.New(ctx, opencode.SessionNewParams{})
+	session, err := client.Session.New(ctx, opencode.SessionNewParams{
+		Directory: opencode.String(flags.dir),
+	})
 	if err != nil {
 		return err
 	}
 
-	print.Info(os.Stdout, "sessionDir: ", session.Directory)
-
 	eventsDone := make(chan error, 1)
 	go func() {
-		eventsDone <- agent.ListenForEvents(ctx, client, session.ID, session.Directory)
+		eventsDone <- agent.ListenForEvents(ctx, client, session.ID)
 	}()
 
 	// Process directives
@@ -100,7 +104,6 @@ func run(ctx context.Context, args []string) error {
 			}
 
 			if os.Getenv("SKIP_PROCESS") == "1" {
-				// @ai skip processing
 				print.Warning(os.Stdout, "Skipping processing")
 				continue
 			}
@@ -163,6 +166,7 @@ type cliFlags struct {
 	port     string
 	model    string
 	provider string
+	dir      string
 }
 
 func (c cliFlags) BaseURL() string {
@@ -173,21 +177,25 @@ func (c cliFlags) BaseURL() string {
 	return url
 }
 
-func parseFlags(flagSet *flag.FlagSet, args []string) cliFlags {
+func parseFlags(flagSet *flag.FlagSet, args []string) (cliFlags, error) {
 	flags := cliFlags{
 		host:     "http://localhost",
 		port:     "3366",
 		model:    "big-pickle",
 		provider: "opencode",
 	}
+	flagSet.StringVar(&flags.dir, "dir", "", "directory to process")
 	flagSet.StringVar(&flags.host, "host", flags.host, "opencode server host (including protocol)")
 	flagSet.StringVar(&flags.port, "port", flags.port, "opencode server port")
 	flagSet.StringVar(&flags.model, "model", flags.model, "model to use")
 	flagSet.StringVar(&flags.provider, "provider", flags.provider, "provider to use")
-
 	flagSet.Parse(args)
 
-	return flags
+	if flags.dir == "" {
+		return flags, fmt.Errorf("--dir flag is required")
+	}
+
+	return flags, nil
 }
 
 func detectLanguage(filePath string) string {
