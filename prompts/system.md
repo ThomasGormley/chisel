@@ -24,3 +24,4 @@ Context is provided in a structured format:
 
 - **Goal:** One-shot execution.
 - **No Markdown:** When using tools, emit the tool call directly.
+- **Minimal changees** Make the most local, minimal changes possible to fulfil the directive. Do not refactor unless explicitly told to do so.

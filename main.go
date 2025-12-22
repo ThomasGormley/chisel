@@ -14,6 +14,7 @@ import (
 	"github.com/sst/opencode-sdk-go/option"
 	"github.com/thomasgormley/chisel/internal/agent"
 	"github.com/thomasgormley/chisel/internal/directive"
+	"github.com/thomasgormley/chisel/internal/print"
 )
 
 //go:embed prompts/system.md
@@ -31,7 +32,7 @@ func main() {
 		log.Fatalf("running: %v", err)
 	}
 
-	fmt.Print("Press Enter to exit...")
+	print.Info(os.Stdout, "Press Enter to exit...")
 	var input string
 	fmt.Scanln(&input)
 }
@@ -43,20 +44,16 @@ func run(ctx context.Context, args []string) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Parse flags
 	flagSet := flag.NewFlagSet("chisel", flag.ExitOnError)
-	host := flagSet.String("host", "http://localhost", "opencode server host (including protocol)")
-	port := flagSet.String("port", "3366", "opencode server port")
-	flagSet.Parse(args)
-
+	flags := parseFlags(flagSet, args)
 	if flagSet.NArg() < 1 {
 		return fmt.Errorf("usage: chisel [flags] <file>")
 	}
 	sourceFile := flagSet.Arg(0)
 
-	baseURL := *host
-	if *port != "" {
-		baseURL = fmt.Sprintf("%s:%s", baseURL, *port)
+	baseURL := flags.host
+	if flags.port != "" {
+		baseURL = fmt.Sprintf("%s:%s", baseURL, flags.port)
 	}
 
 	// Read and parse directives
@@ -72,12 +69,12 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	if len(directives) == 0 {
-		fmt.Println("No @ai directives found.")
+		print.Warning(os.Stdout, "No @ai directives found. To apply a directive, add a comment like // @ai <instruction> in your code.")
 		return nil
 	}
 
-	// Setup client and session
 	client := opencode.NewClient(option.WithBaseURL(baseURL))
+
 	mainSession, err := client.Session.New(ctx, opencode.SessionNewParams{})
 	if err != nil {
 		return err
@@ -93,21 +90,24 @@ func run(ctx context.Context, args []string) error {
 	processDone := make(chan error, 1)
 	go func() {
 		for _, d := range directives {
-			log.Printf("Processing directive: %s", d.Function)
+			modelParams := opencode.F(opencode.SessionPromptParamsModel{
+				ModelID:    opencode.String(flags.model),
+				ProviderID: opencode.String(flags.provider),
+			})
+			print.Info(os.Stdout, "Processing directive in function:", d.Function)
+			print.Info(os.Stdout, "->", modelParams.Value.ProviderID.String(), "/", modelParams.Value.ModelID.String())
 			promptText, err := d.Prompt()
 			if err != nil {
 				processDone <- err
 				return
 			}
+
 			_, err = client.Session.Prompt(
 				ctx,
 				mainSession.ID,
 				opencode.SessionPromptParams{
 					System: opencode.String(string(systemPrompt)),
-					Model: opencode.F(opencode.SessionPromptParamsModel{
-						ModelID:    opencode.String("big-pickle"),
-						ProviderID: opencode.String("opencode"),
-					}),
+					Model:  modelParams,
 					Parts: opencode.F(
 						[]opencode.SessionPromptParamsPartUnion{
 							opencode.TextPartInputParam{
@@ -127,7 +127,7 @@ func run(ctx context.Context, args []string) error {
 				return
 			}
 		}
-		fmt.Println("\nAll directives processed. Check filesystem for changes.")
+		print.Success(os.Stdout, "\nAll directives processed. Check filesystem for changes.")
 		processDone <- nil
 	}()
 
@@ -141,9 +141,33 @@ func run(ctx context.Context, args []string) error {
 		cancel()
 		return fmt.Errorf("event stream error: %w", err)
 	case <-ctx.Done():
-		fmt.Println("Shutting down, aborting client session...")
+		print.Warning(os.Stdout, "Shutting down, aborting client session...")
 		client.Session.Abort(ctx, mainSession.ID, opencode.SessionAbortParams{})
 		<-eventsDone
 		return ctx.Err()
 	}
+}
+
+type cliFlags struct {
+	host     string
+	port     string
+	model    string
+	provider string
+}
+
+func parseFlags(flagSet *flag.FlagSet, args []string) cliFlags {
+	flags := cliFlags{
+		host:     "http://localhost",
+		port:     "3366",
+		model:    "big-pickle",
+		provider: "opencode",
+	}
+	flagSet.StringVar(&flags.host, "host", flags.host, "opencode server host (including protocol)")
+	flagSet.StringVar(&flags.port, "port", flags.port, "opencode server port")
+	flagSet.StringVar(&flags.model, "model", flags.model, "model to use")
+	flagSet.StringVar(&flags.provider, "provider", flags.provider, "provider to use")
+
+	flagSet.Parse(args)
+
+	return flags
 }
