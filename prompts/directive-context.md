@@ -1,12 +1,9 @@
-<META>
-FILE_PATH: %s
-SYMBOL: %s
-</META>
+Target: `%s` in `%s`
 
-<USER_DIRECTIVE>
+<directive>
 %s
-</USER_DIRECTIVE>
+</directive>
 
-<SOURCE_CODE>
+```%s
 %s
-</SOURCE_CODE>
+```

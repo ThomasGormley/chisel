@@ -5,9 +5,9 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/sst/opencode-sdk-go"
@@ -26,13 +26,10 @@ var directivePromptFile []byte
 func main() {
 	ctx := context.Background()
 	if err := run(ctx, os.Args[1:]); err != nil {
-		fmt.Print("error... " + err.Error())
-		var input string
-		fmt.Scanln(&input)
-		log.Fatalf("running: %v", err)
+		print.Errorf(os.Stderr, "error running CLI: %s\n", err)
 	}
 
-	print.Info(os.Stdout, "Press Enter to exit...")
+	print.Info(os.Stdout, "Press Enter to exit...\n")
 	var input string
 	fmt.Scanln(&input)
 }
@@ -45,9 +42,15 @@ func run(ctx context.Context, args []string) error {
 	defer stop()
 
 	flagSet := flag.NewFlagSet("chisel", flag.ExitOnError)
+
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: chisel [flags] <file>\n")
+		flagSet.PrintDefaults()
+	}
 	flags := parseFlags(flagSet, args)
 	if flagSet.NArg() < 1 {
-		return fmt.Errorf("usage: chisel [flags] <file>")
+		flagSet.Usage()
+		return nil
 	}
 	sourceFile := flagSet.Arg(0)
 
@@ -67,7 +70,7 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	client := opencode.NewClient(option.WithBaseURL(flags.baseURL))
+	client := opencode.NewClient(option.WithBaseURL(flags.baseURL()))
 
 	mainSession, err := client.Session.New(ctx, opencode.SessionNewParams{})
 	if err != nil {
@@ -107,9 +110,10 @@ func run(ctx context.Context, args []string) error {
 							opencode.TextPartInputParam{
 								Type: opencode.F(opencode.TextPartInputType("text")),
 								Text: opencode.String(fmt.Sprintf(string(directivePromptFile),
-									sourceFile,
 									d.Function,
+									sourceFile,
 									promptText,
+									detectLanguage(sourceFile),
 									d.Source,
 								)),
 							},
@@ -135,7 +139,7 @@ func run(ctx context.Context, args []string) error {
 		cancel()
 		return fmt.Errorf("event stream error: %w", err)
 	case <-ctx.Done():
-		print.Warning(os.Stdout, "Shutting down, aborting client session...")
+		print.Warning(os.Stdout, print.Wrap("Shutting down, aborting client session..."))
 		client.Session.Abort(ctx, mainSession.ID, opencode.SessionAbortParams{})
 		<-eventsDone
 		return ctx.Err()
@@ -147,7 +151,14 @@ type cliFlags struct {
 	port     string
 	model    string
 	provider string
-	baseURL  string
+}
+
+func (c cliFlags) baseURL() string {
+	url := c.host
+	if c.port != "" {
+		url = fmt.Sprintf("%s:%s", url, c.port)
+	}
+	return url
 }
 
 func parseFlags(flagSet *flag.FlagSet, args []string) cliFlags {
@@ -164,10 +175,15 @@ func parseFlags(flagSet *flag.FlagSet, args []string) cliFlags {
 
 	flagSet.Parse(args)
 
-	flags.baseURL = flags.host
-	if flags.port != "" {
-		flags.baseURL = fmt.Sprintf("%s:%s", flags.baseURL, flags.port)
-	}
-
 	return flags
+}
+
+func detectLanguage(filePath string) string {
+	ext := filepath.Ext(filePath)
+	switch ext {
+	case ".go":
+		return "go"
+	default:
+		return ""
+	}
 }
