@@ -20,10 +20,16 @@ var systemPrompt []byte
 var directivePromptFile []byte
 
 func main() {
-	// @ai add graceful shutdown
-	if err := run(context.Background(), os.Args); err != nil {
+	if err := run(context.Background(), os.Args[1:]); err != nil {
+		fmt.Print("error... " + err.Error())
+		var input string
+		fmt.Scanln(&input)
 		log.Fatalf("running: %v", err)
 	}
+
+	fmt.Print("Press Enter to exit...")
+	var input string
+	fmt.Scanln(&input)
 }
 
 func run(ctx context.Context, args []string) error {
@@ -103,8 +109,5 @@ func run(ctx context.Context, args []string) error {
 
 	fmt.Println("\nAll directives processed. Check filesystem for changes.")
 
-	fmt.Print("Press Enter to exit...")
-	var input string
-	fmt.Scanln(&input)
 	return nil
 }

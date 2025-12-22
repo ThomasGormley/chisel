@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/sst/opencode-sdk-go"
+	"github.com/thomasgormley/chisel/internal/print"
 )
 
 type DialogResponse struct {
@@ -82,37 +84,43 @@ func eventListener(ctx context.Context, client *opencode.Client) {
 				evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
 				part := evt.Properties.Part
 
-				if (part.Type == opencode.PartTypeReasoning || part.Type == opencode.PartTypeText) && evt.Properties.Delta != "" {
-					fmt.Print(evt.Properties.Delta)
+				switch part.Type {
+				case opencode.PartTypeReasoning, opencode.PartTypeText:
+					if evt.Properties.Delta != "" {
+						print.Infof(os.Stdout, "%s", evt.Properties.Delta)
+					}
+
+				case opencode.PartTypeTool:
+					if part.Tool != "" {
+						// Only print tool header once per tool call to avoid duplicate notifications
+						// when the same tool receives multiple update events (e.g., progress updates)
+						if part.ID != lastToolCallID {
+							lastToolCallID = part.ID
+							lastToolTitle = ""
+							print.Notef(os.Stdout, print.WrapTop("🔨 Tool: %s"), part.Tool)
+						}
+
+						// Safely handle state as a map for more flexible property checking
+						state, ok := part.State.(opencode.ToolPartState)
+						if ok {
+							if state.Title != "" && state.Title != lastToolTitle {
+								lastToolTitle = state.Title
+								print.Infof(os.Stdout, " (%s)", state.Title)
+							}
+							if state.Status == "completed" || state.Status == "error" {
+								print.Infof(os.Stdout, "\n")
+							}
+						}
+					}
 				}
 
 				if part.URL != "" {
-					fmt.Printf("\n🌐 Fetching: %s\n", part.URL)
-				}
-
-				if part.Type == opencode.PartTypeTool && part.Tool != "" {
-					if part.ID != lastToolCallID {
-						lastToolCallID = part.ID
-						lastToolTitle = ""
-						fmt.Printf("\n🔨 Tool: %s", part.Tool)
-					}
-
-					// Safely handle state as a map for more flexible property checking
-					state, ok := part.State.(opencode.ToolPartState)
-					if ok {
-						if state.Title != "" && state.Title != lastToolTitle {
-							lastToolTitle = state.Title
-							fmt.Printf(" (%s)", state.Title)
-						}
-						if state.Status == "completed" || state.Status == "error" {
-							fmt.Println()
-						}
-					}
+					print.Infof(os.Stdout, print.Wrap("🌐 Fetching: %s"), part.URL)
 				}
 
 			case opencode.EventListResponseTypeFileEdited:
 				evt := event.AsUnion().(opencode.EventListResponseEventFileEdited)
-				fmt.Printf("\n💾 Edited: %s\n", evt.Properties.File)
+				print.Successf(os.Stdout, print.Wrap("💾 Edited: %s"), evt.Properties.File)
 
 			case opencode.EventListResponseTypeTodoUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventTodoUpdated)
@@ -120,24 +128,25 @@ func eventListener(ctx context.Context, client *opencode.Client) {
 					prevStatus := lastTodoStatus[todo.ID]
 					if todo.Status != prevStatus {
 						lastTodoStatus[todo.ID] = todo.Status
-						if todo.Status == "completed" {
-							fmt.Printf("\n✅ %s\n", todo.Content)
-						} else if todo.Status == "in_progress" {
-							fmt.Printf("\n⏳ %s\n", todo.Content)
+						switch todo.Status {
+						case "completed":
+							print.Successf(os.Stdout, print.Wrap("✅ %s"), todo.Content)
+						case "in_progress":
+							print.Warningf(os.Stdout, print.Wrap("⏳ %s"), todo.Content)
 						}
 					}
 				}
 
 			case opencode.EventListResponseTypeSessionError:
 				evt := event.AsUnion().(opencode.EventListResponseEventSessionError)
-				fmt.Printf("\n❌ Session error: %s\n", evt.Properties.Error.Name)
+				print.Errorf(os.Stdout, print.Wrap("❌ Session error: %s"), evt.Properties.Error.Name)
 
 			case opencode.EventListResponseTypeLspClientDiagnostics:
 				evt := event.AsUnion().(opencode.EventListResponseEventLspClientDiagnostics)
-				fmt.Printf("\n🚨 LSP Diagnostic at %s (Server: %s)\n", evt.Properties.Path, evt.Properties.ServerID)
+				print.Warningf(os.Stdout, print.Wrap("🚨 LSP Diagnostic at %s (Server: %s)"), evt.Properties.Path, evt.Properties.ServerID)
 
 			case opencode.EventListResponseTypeSessionIdle:
-				fmt.Println("🏁 Done.")
+				print.Success(os.Stdout, print.Wrap("🏁 Done."))
 			}
 		}
 	}
