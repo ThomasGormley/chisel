@@ -41,23 +41,13 @@ func run(ctx context.Context, args []string) error {
 	ctx, stop := signal.NotifyContext(mainCtx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	flagSet := flag.NewFlagSet("chisel", flag.ExitOnError)
-
-	flagSet.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: chisel [flags] <file>\n")
-		flagSet.PrintDefaults()
-	}
-	flags, err := parseFlags(flagSet, args)
-	if err != nil {
-		flagSet.Usage()
+	flags, ok, err := parseFlags(args)
+	if err != nil || !ok {
+		flags.flagSet.Usage()
 		return err
 	}
-	if flagSet.NArg() < 1 {
-		flagSet.Usage()
-		return nil
-	}
 
-	sourceFile := flagSet.Arg(0)
+	sourceFile := flags.flagSet.Arg(0)
 	file, err := os.ReadFile(sourceFile)
 	if err != nil {
 		return err
@@ -87,7 +77,6 @@ func run(ctx context.Context, args []string) error {
 		eventsDone <- agent.ListenForEvents(ctx, client, session.ID)
 	}()
 
-	// Process directives
 	processDone := make(chan error, 1)
 	go func() {
 		for _, d := range directives {
@@ -167,6 +156,8 @@ type cliFlags struct {
 	model    string
 	provider string
 	dir      string
+
+	flagSet *flag.FlagSet
 }
 
 func (c cliFlags) BaseURL() string {
@@ -177,25 +168,38 @@ func (c cliFlags) BaseURL() string {
 	return url
 }
 
-func parseFlags(flagSet *flag.FlagSet, args []string) (cliFlags, error) {
+func parseFlags(args []string) (cliFlags, bool, error) {
+	flagSet := flag.NewFlagSet("chisel", flag.ExitOnError)
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: chisel [flags] <file>\n")
+		flagSet.PrintDefaults()
+	}
+
 	flags := cliFlags{
 		host:     "http://localhost",
 		port:     "3366",
 		model:    "big-pickle",
 		provider: "opencode",
+
+		flagSet: flagSet,
 	}
 	flagSet.StringVar(&flags.dir, "dir", "", "directory to process")
 	flagSet.StringVar(&flags.host, "host", flags.host, "opencode server host (including protocol)")
 	flagSet.StringVar(&flags.port, "port", flags.port, "opencode server port")
 	flagSet.StringVar(&flags.model, "model", flags.model, "model to use")
 	flagSet.StringVar(&flags.provider, "provider", flags.provider, "provider to use")
+
 	flagSet.Parse(args)
 
 	if flags.dir == "" {
-		return flags, fmt.Errorf("--dir flag is required")
+		return flags, false, fmt.Errorf("--dir flag is required")
 	}
 
-	return flags, nil
+	if flagSet.NArg() < 1 {
+		return cliFlags{}, false, nil
+	}
+
+	return flags, true, nil
 }
 
 func detectLanguage(filePath string) string {
