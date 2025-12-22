@@ -10,6 +10,7 @@ import (
 
 	"github.com/sst/opencode-sdk-go"
 	"github.com/sst/opencode-sdk-go/option"
+	"github.com/thomasgormley/chisel/internal/directive"
 )
 
 //go:embed prompts/system.md
@@ -19,6 +20,7 @@ var systemPrompt []byte
 var directivePromptFile []byte
 
 func main() {
+	// @ai add graceful shutdown
 	if err := run(context.Background(), os.Args); err != nil {
 		log.Fatalf("running: %v", err)
 	}
@@ -41,7 +43,7 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	parser := NewParser()
+	parser := directive.NewParser()
 	directives, err := parser.Parse(file)
 	if err != nil {
 		return err
