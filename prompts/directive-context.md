@@ -1,4 +1,4 @@
-Target: `%s` in `%s`
+Target: `%s` in `%s` (lines %d-%d)
 
 <directive>
 %s

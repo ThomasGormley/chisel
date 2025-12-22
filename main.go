@@ -109,6 +109,8 @@ func run(ctx context.Context, args []string) error {
 								Text: opencode.String(fmt.Sprintf(string(directivePromptFile),
 									d.Function,
 									sourceFile,
+									d.StartLine,
+									d.EndLine,
 									promptText,
 									detectLanguage(sourceFile),
 									d.Source,
@@ -118,7 +120,7 @@ func run(ctx context.Context, args []string) error {
 				},
 			)
 			if err != nil {
-				directiveErrCh <- err
+				directiveErrCh <- fmt.Errorf("prompting: %w", err)
 				return
 			}
 		}

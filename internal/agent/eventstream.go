@@ -51,7 +51,7 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 
 			event := stream.Current()
 
-			if !isEventForSession(event, sessionID) {
+			if !shouldListen(event, sessionID) {
 				continue
 			}
 
@@ -136,12 +136,16 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 	}
 }
 
-func isEventForSession(e opencode.EventListResponse, sID string) bool {
+func shouldListen(e opencode.EventListResponse, sID string) bool {
 	var properties struct {
 		SessionID string `json:"sessionID"`
 	}
 	if raw := e.JSON.Properties.Raw(); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &properties)
+	}
+
+	if properties.SessionID == "" {
+		return true // not bound to a specific session
 	}
 
 	return properties.SessionID == sID
