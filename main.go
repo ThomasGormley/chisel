@@ -51,12 +51,6 @@ func run(ctx context.Context, args []string) error {
 	}
 	sourceFile := flagSet.Arg(0)
 
-	baseURL := flags.host
-	if flags.port != "" {
-		baseURL = fmt.Sprintf("%s:%s", baseURL, flags.port)
-	}
-
-	// Read and parse directives
 	file, err := os.ReadFile(sourceFile)
 	if err != nil {
 		return err
@@ -73,7 +67,7 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	client := opencode.NewClient(option.WithBaseURL(baseURL))
+	client := opencode.NewClient(option.WithBaseURL(flags.baseURL))
 
 	mainSession, err := client.Session.New(ctx, opencode.SessionNewParams{})
 	if err != nil {
@@ -153,6 +147,7 @@ type cliFlags struct {
 	port     string
 	model    string
 	provider string
+	baseURL  string
 }
 
 func parseFlags(flagSet *flag.FlagSet, args []string) cliFlags {
@@ -168,6 +163,11 @@ func parseFlags(flagSet *flag.FlagSet, args []string) cliFlags {
 	flagSet.StringVar(&flags.provider, "provider", flags.provider, "provider to use")
 
 	flagSet.Parse(args)
+
+	flags.baseURL = flags.host
+	if flags.port != "" {
+		flags.baseURL = fmt.Sprintf("%s:%s", flags.baseURL, flags.port)
+	}
 
 	return flags
 }

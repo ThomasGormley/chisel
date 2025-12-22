@@ -39,10 +39,6 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
 	defer stream.Close()
 
-	lastToolCallID := ""
-	lastToolTitle := ""
-	lastTodoStatus := make(map[string]string)
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -86,21 +82,13 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 
 				case opencode.PartTypeTool:
 					if part.Tool != "" {
-						// Only print tool header once per tool call to avoid duplicate notifications
-						// when the same tool receives multiple update events (e.g., progress updates)
-						if part.ID != lastToolCallID {
-							lastToolCallID = part.ID
-							lastToolTitle = ""
-							print.Notef(os.Stdout, print.WrapTop("🔨 Tool: %s"), part.Tool)
-						}
+
+						print.Notef(os.Stdout, print.Wrap("🔨 Tool: %s"), part.Tool)
 
 						// Safely handle state as a map for more flexible property checking
 						state, ok := part.State.(opencode.ToolPartState)
-						if ok {
-							if state.Title != "" && state.Title != lastToolTitle {
-								lastToolTitle = state.Title
-								print.Infof(os.Stdout, " (%s)", state.Title)
-							}
+						if ok && state.Title != "" {
+							print.Infof(os.Stdout, " (%s)", state.Title)
 							if state.Status == "completed" || state.Status == "error" {
 								print.Infof(os.Stdout, "\n")
 							}
@@ -119,15 +107,11 @@ func ListenForEvents(ctx context.Context, client *opencode.Client) error {
 			case opencode.EventListResponseTypeTodoUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventTodoUpdated)
 				for _, todo := range evt.Properties.Todos {
-					prevStatus := lastTodoStatus[todo.ID]
-					if todo.Status != prevStatus {
-						lastTodoStatus[todo.ID] = todo.Status
-						switch todo.Status {
-						case "completed":
-							print.Successf(os.Stdout, print.Wrap("✅ %s"), todo.Content)
-						case "in_progress":
-							print.Warningf(os.Stdout, print.Wrap("⏳ %s"), todo.Content)
-						}
+					switch todo.Status {
+					case "completed":
+						print.Successf(os.Stdout, print.Wrap("✅ %s"), todo.Content)
+					case "in_progress":
+						print.Warningf(os.Stdout, print.Wrap("⏳ %s"), todo.Content)
 					}
 				}
 
