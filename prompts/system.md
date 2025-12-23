@@ -23,7 +23,7 @@ Each request contains:
 2. **Minimal exploration.** Only use `read` or `grep` when BOTH conditions are met:
    - The directive explicitly names a type, function, or constant (e.g., "add logging like Logger.Debugf", "use the UserValidator struct")
    - That named symbol is NOT defined in the provided source block
-   
+
    Do NOT read files for:
    - Understanding "how this should work"
    - Finding similar patterns in the codebase
@@ -52,6 +52,18 @@ Your edit is constrained by the function boundaries provided in the target above
 5. **Global state**: Do NOT modify or reference global variables, constants, or type definitions outside the function
 
 If a directive requires changes outside these boundaries, execute only what you can within the scope and add a `// @ai TODO: ...` comment explaining what remains.
+
+## Anti-Patterns
+
+Do NOT:
+
+- Add imports that aren't strictly necessary for the change
+- Refactor surrounding code "while you're at it"
+- Add comments explaining your changes
+- Add error handling beyond what the directive requests
+- Output explanations or summaries
+- Grep the entire codebase for common patterns; use source or quick `read`.
+- Over-verify assumptions (e.g., don't search for import existence if source shows usage).
 
 ## Examples
 
@@ -138,7 +150,8 @@ func ProcessData(input string) error {
 	return nil
 }
 ```
-```
+
+````
 
 Correct edit:
 ```go
@@ -152,22 +165,10 @@ func ProcessData(input string) error {
 	// ... process response
 	return nil
 }
-```
+````
 
 Why this is correct: The directive requires retry logic, which needs loops and delays - beyond minimal edit scope. Added a TODO comment instead of implementing full retry. Did not add imports or modify signature.
 </example>
-
-## Anti-Patterns
-
-Do NOT:
-
-- Add imports that aren't strictly necessary for the change
-- Refactor surrounding code "while you're at it"
-- Add comments explaining your changes
-- Add error handling beyond what the directive requests
-- Output explanations or summaries
-- Grep the entire codebase for common patterns; use source or quick `read`.
-- Over-verify assumptions (e.g., don't search for import existence if source shows usage).
 
 ## Exploration Examples
 

@@ -62,13 +62,21 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 				continue
 			}
 
+			if event.Type != opencode.EventListResponseTypeMessagePartUpdated {
+				if !sessionIDMatches(event, sessionID) {
+					continue
+				}
+			} else {
+				evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
+				if evt.Properties.Part.SessionID != sessionID {
+					continue
+				}
+			}
+
 			switch event.Type {
 
 			case opencode.EventListResponseTypePermissionUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
-				if evt.Properties.SessionID != sessionID {
-					continue
-				}
 				dialogResult := permissionDialog("Chisel Permission", "Agent is requesting permission to perform an action.")
 
 				response := opencode.SessionPermissionRespondParamsResponseReject
@@ -88,9 +96,6 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 			case opencode.EventListResponseTypeMessagePartUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
 				part := evt.Properties.Part
-				if part.SessionID != sessionID {
-					continue
-				}
 
 				switch part.Type {
 				case opencode.PartTypeReasoning, opencode.PartTypeText:
@@ -128,9 +133,6 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 
 			case opencode.EventListResponseTypeSessionError:
 				evt := event.AsUnion().(opencode.EventListResponseEventSessionError)
-				if evt.Properties.SessionID != sessionID {
-					continue
-				}
 				print.Errorf(os.Stdout, print.Wrap("❌ Session error: %s"), evt.Properties.Error.Name)
 
 			case opencode.EventListResponseTypeLspClientDiagnostics:
@@ -139,26 +141,18 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 				print.Warningf(os.Stdout, print.Wrap("🚨 LSP Diagnostic at %s (Server: %s)"), evt.Properties.Path, evt.Properties.ServerID)
 
 			case opencode.EventListResponseTypeSessionIdle:
-				evt := event.AsUnion().(opencode.EventListResponseEventSessionIdle)
-				if evt.Properties.SessionID != sessionID {
-					continue
-				}
 				print.Success(os.Stdout, print.WrapTop("🏁 Done."))
-				if totalTokenInput > 0 || totalTokenOutput > 0 || totalTokenReasoning > 0 || totalCost > 0 {
-					print.Infof(os.Stdout, print.WrapBottom("━━━━━━━━━━━━━━━━━━━━"))
-					print.Infof(os.Stdout, "  Session Totals")
-					if totalTokenInput > 0 {
-						print.Infof(os.Stdout, "  Input: %.0f tokens", totalTokenInput)
-					}
-					if totalTokenOutput > 0 {
-						print.Infof(os.Stdout, "  Output: %.0f tokens", totalTokenOutput)
-					}
-					if totalTokenReasoning > 0 {
-						print.Infof(os.Stdout, "  Reasoning: %.0f tokens", totalTokenReasoning)
-					}
-					if totalCost > 0 {
-						print.Infof(os.Stdout, "  Cost: $%.4f", totalCost)
-					}
+				if totalTokenInput > 0 {
+					print.Infof(os.Stdout, print.WrapBottom("  Input: %.0f tokens"), totalTokenInput)
+				}
+				if totalTokenOutput > 0 {
+					print.Infof(os.Stdout, print.WrapBottom("  Output: %.0f tokens"), totalTokenOutput)
+				}
+				if totalTokenReasoning > 0 {
+					print.Infof(os.Stdout, print.WrapBottom("  Reasoning: %.0f tokens"), totalTokenReasoning)
+				}
+				if totalCost > 0 {
+					print.Infof(os.Stdout, print.WrapBottom("  Cost: $%.4f"), totalCost)
 				}
 			}
 		}
@@ -178,6 +172,22 @@ func shouldListen(e opencode.EventListResponse, sID string) bool {
 	}
 
 	return properties.SessionID == sID
+}
+
+func sessionIDMatches(event opencode.EventListResponse, sessionID string) bool {
+	switch event.Type {
+	case opencode.EventListResponseTypePermissionUpdated:
+		evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
+		return evt.Properties.SessionID == sessionID
+	case opencode.EventListResponseTypeSessionError:
+		evt := event.AsUnion().(opencode.EventListResponseEventSessionError)
+		return evt.Properties.SessionID == sessionID
+	case opencode.EventListResponseTypeSessionIdle:
+		evt := event.AsUnion().(opencode.EventListResponseEventSessionIdle)
+		return evt.Properties.SessionID == sessionID
+	default:
+		return true
+	}
 }
 
 func handleToolPart(part opencode.Part, prevHandledTool string) {
@@ -207,7 +217,7 @@ func handleStepFinishPart(
 	totalTokenReasoning,
 	totalCost *float64,
 ) {
-	print.Successf(os.Stdout, print.Wrap("✓ Step completed"))
+	print.Successf(os.Stdout, print.Wrap("✅ Step completed"))
 	*totalCost += part.Cost
 	if part.Tokens != nil {
 		if tokens, ok := part.Tokens.(opencode.StepFinishPartTokens); ok {
