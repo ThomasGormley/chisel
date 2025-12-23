@@ -72,6 +72,11 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 
+	_, err = client.Session.Get(ctx, session.ID, opencode.SessionGetParams{})
+	if err != nil {
+		return err
+	}
+
 	listenerErrCh := make(chan error, 1)
 	go func() {
 		listenerErrCh <- agent.ListenForEvents(ctx, client, session.ID)
@@ -96,12 +101,13 @@ func run(ctx context.Context, args []string) error {
 				print.Warning(os.Stdout, "Skipping processing")
 				continue
 			}
-			_, err = client.Session.Prompt(
+			rsp, err := client.Session.Prompt(
 				ctx,
 				session.ID,
 				opencode.SessionPromptParams{
-					System: opencode.String(string(systemPrompt)),
-					Model:  modelParams,
+					Directory: opencode.String(flags.dir),
+					System:    opencode.String(string(systemPrompt)),
+					Model:     modelParams,
 					Parts: opencode.F(
 						[]opencode.SessionPromptParamsPartUnion{
 							opencode.TextPartInputParam{
@@ -120,6 +126,9 @@ func run(ctx context.Context, args []string) error {
 				},
 			)
 			if err != nil {
+				var json []byte
+				rsp.UnmarshalJSON(json)
+				print.Error(os.Stdout, "err prompting: ", string(json))
 				directiveErrCh <- fmt.Errorf("prompting: %w", err)
 				return
 			}
