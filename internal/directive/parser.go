@@ -63,8 +63,6 @@ func (d *AIDirective) Prompt() (string, error) {
 
 // Parse extracts all AI directives from the given Go source code.
 func (p *Parser) Parse(code []byte) ([]AIDirective, error) {
-	log.Printf("Parsing %d bytes of code", len(code))
-
 	parser := ts.NewParser()
 	defer parser.Close()
 
@@ -82,7 +80,6 @@ func (p *Parser) Parse(code []byte) ([]AIDirective, error) {
 		return nil, err
 	}
 
-	log.Printf("Found %d AI directives", len(directives))
 	return directives, nil
 }
 

@@ -40,6 +40,13 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 	stream := client.Event.ListStreaming(ctx, opencode.EventListParams{})
 	defer stream.Close()
 
+	var (
+		prevToolHandled     string
+		totalTokenInput     float64
+		totalTokenOutput    float64
+		totalTokenReasoning float64
+		totalCost           float64
+	)
 	for {
 		select {
 		case <-ctx.Done():
@@ -92,19 +99,14 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 					}
 
 				case opencode.PartTypeTool:
-					handleToolPart(part)
+					handleToolPart(part, prevToolHandled)
 
 				case opencode.PartTypeStepStart:
 					handleStepStartPart(part)
 
 				case opencode.PartTypeStepFinish:
-					handleStepFinishPart(part)
-
-				case opencode.PartTypeSnapshot:
-					handleSnapshotPart(part)
-
-				case opencode.PartTypePatch:
-					handlePatchPart(part)
+					prevToolHandled = "" // reset the tool on step finish
+					handleStepFinishPart(part, &totalTokenInput, &totalTokenOutput, &totalTokenReasoning, &totalCost)
 
 				case opencode.PartTypeAgent:
 					handleAgentPart(part)
@@ -141,7 +143,23 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 				if evt.Properties.SessionID != sessionID {
 					continue
 				}
-				print.Success(os.Stdout, print.Wrap("🏁 Done."))
+				print.Success(os.Stdout, print.WrapTop("🏁 Done."))
+				if totalTokenInput > 0 || totalTokenOutput > 0 || totalTokenReasoning > 0 || totalCost > 0 {
+					print.Infof(os.Stdout, print.WrapBottom("━━━━━━━━━━━━━━━━━━━━"))
+					print.Infof(os.Stdout, "  Session Totals")
+					if totalTokenInput > 0 {
+						print.Infof(os.Stdout, "  Input: %.0f tokens", totalTokenInput)
+					}
+					if totalTokenOutput > 0 {
+						print.Infof(os.Stdout, "  Output: %.0f tokens", totalTokenOutput)
+					}
+					if totalTokenReasoning > 0 {
+						print.Infof(os.Stdout, "  Reasoning: %.0f tokens", totalTokenReasoning)
+					}
+					if totalCost > 0 {
+						print.Infof(os.Stdout, "  Cost: $%.4f", totalCost)
+					}
+				}
 			}
 		}
 	}
@@ -162,14 +180,15 @@ func shouldListen(e opencode.EventListResponse, sID string) bool {
 	return properties.SessionID == sID
 }
 
-func handleToolPart(part opencode.Part) {
+func handleToolPart(part opencode.Part, prevHandledTool string) {
+	if part.Tool != "" && part.Tool == prevHandledTool {
+		return
+	}
 	state, ok := part.State.(opencode.ToolPartState)
 
 	if part.Tool != "" {
 		if ok && state.Title != "" {
 			print.Notef(os.Stdout, print.Wrap("🔨 Tool: %s (%s)"), part.Tool, state.Title)
-		} else {
-			print.Notef(os.Stdout, print.Wrap("🔨 Tool: %s"), part.Tool)
 		}
 		if ok && (state.Status == "completed" || state.Status == "error") {
 			print.Infof(os.Stdout, "\n")
@@ -177,49 +196,24 @@ func handleToolPart(part opencode.Part) {
 	}
 }
 
-func handleStepStartPart(part opencode.Part) {
+func handleStepStartPart(_ opencode.Part) {
 	print.Notef(os.Stdout, print.Wrap("⚡ Step started"))
-	if part.Snapshot != "" {
-		print.Infof(os.Stdout, print.Wrap("  Snapshot: %s"), part.Snapshot)
-	}
 }
 
-func handleStepFinishPart(part opencode.Part) {
+func handleStepFinishPart(
+	part opencode.Part,
+	totalTokenInput,
+	totalTokenOutput,
+	totalTokenReasoning,
+	totalCost *float64,
+) {
 	print.Successf(os.Stdout, print.Wrap("✓ Step completed"))
-	if part.Reason != "" {
-		print.Infof(os.Stdout, "  Reason: %s\n", part.Reason)
-	}
+	*totalCost += part.Cost
 	if part.Tokens != nil {
-		if tokens, ok := part.Tokens.(map[string]interface{}); ok {
-			if input, ok := tokens["input"].(float64); ok && input > 0 {
-				print.Infof(os.Stdout, "  Tokens: input=%.0f", input)
-			}
-			if output, ok := tokens["output"].(float64); ok && output > 0 {
-				print.Infof(os.Stdout, " output=%.0f", output)
-			}
-			if reasoning, ok := tokens["reasoning"].(float64); ok && reasoning > 0 {
-				print.Infof(os.Stdout, " reasoning=%.0f", reasoning)
-			}
-			print.Infof(os.Stdout, "\n")
-		}
-	}
-	if part.Cost > 0 {
-		print.Infof(os.Stdout, "  Cost: $%.4f\n", part.Cost)
-	}
-}
-
-func handleSnapshotPart(part opencode.Part) {
-	print.Notef(os.Stdout, print.Wrap("📸 Snapshot: %s"), part.Snapshot)
-}
-
-func handlePatchPart(part opencode.Part) {
-	if part.Files != nil {
-		if files, ok := part.Files.([]interface{}); ok && len(files) > 0 {
-			print.Notef(os.Stdout, print.Wrap("📦 Patching %d files"), len(files))
-			hash := part.Hash
-			if hash != "" {
-				print.Infof(os.Stdout, "  Hash: %s\n", hash)
-			}
+		if tokens, ok := part.Tokens.(opencode.StepFinishPartTokens); ok {
+			*totalTokenInput += tokens.Input
+			*totalTokenOutput += tokens.Output
+			*totalTokenReasoning += tokens.Reasoning
 		}
 	}
 }
@@ -236,15 +230,9 @@ func handleAgentPart(part opencode.Part) {
 func handleRetryPart(part opencode.Part) {
 	print.Warningf(os.Stdout, print.Wrap("🔄 Retry attempt %.0f"), part.Attempt)
 	if part.Error != nil {
-		if err, ok := part.Error.(map[string]interface{}); ok {
-			if name, ok := err["name"].(string); ok {
-				print.Infof(os.Stdout, "  Error: %s", name)
-			}
-			if data, ok := err["data"].(map[string]interface{}); ok {
-				if msg, ok := data["message"].(string); ok {
-					print.Infof(os.Stdout, " - %s", msg)
-				}
-			}
+		if err, ok := part.Error.(opencode.PartRetryPartError); ok {
+			print.Infof(os.Stdout, "  Error: %s", err.Name)
+			print.Infof(os.Stdout, " - %s", err.Data.Message)
 			print.Infof(os.Stdout, "\n")
 		}
 	}
