@@ -58,23 +58,7 @@ func ListenForEvents(ctx context.Context, client *opencode.Client, sessionID str
 
 			event := stream.Current()
 
-			if !shouldListen(event, sessionID) {
-				continue
-			}
-
-			if event.Type != opencode.EventListResponseTypeMessagePartUpdated {
-				if !sessionIDMatches(event, sessionID) {
-					continue
-				}
-			} else {
-				evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
-				if evt.Properties.Part.SessionID != sessionID {
-					continue
-				}
-			}
-
 			switch event.Type {
-
 			case opencode.EventListResponseTypePermissionUpdated:
 				evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
 				dialogResult := permissionDialog("Chisel Permission", "Agent is requesting permission to perform an action.")
@@ -176,6 +160,9 @@ func shouldListen(e opencode.EventListResponse, sID string) bool {
 
 func sessionIDMatches(event opencode.EventListResponse, sessionID string) bool {
 	switch event.Type {
+	case opencode.EventListResponseTypeMessageUpdated:
+		evt := event.AsUnion().(opencode.EventListResponseEventMessagePartUpdated)
+		return evt.Properties.Part.SessionID == sessionID
 	case opencode.EventListResponseTypePermissionUpdated:
 		evt := event.AsUnion().(opencode.EventListResponseEventPermissionUpdated)
 		return evt.Properties.SessionID == sessionID
